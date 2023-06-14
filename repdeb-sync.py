@@ -26,8 +26,8 @@ import wget
 import shutil
 
 # static config
-configFile = "sync-repo-from-github.ini"
-# configFile = "/root/repo-helper/sync-repo-from-github.ini"
+configFile = "repdeb-sync-config.ini"
+# configFile = "/root/repdeb/repdeb-sync-config.ini"
 configFileGeneral = "GENERAL"
 
 
