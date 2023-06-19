@@ -65,6 +65,9 @@ name_scheme_armhf =
 Remind to add the REPONAME to the remote_sources line in GENERAL-section!
 See the provided config for more details!
 
+
+The path to the config file is defined as static variable in the header of repdeb-sync.py as variable "configFile", edit this if you're using a different directory for the config!
+
 ## repdeb-autoindex
 Automatically update repositories Package and Releases files and sign them with gpg.
 
