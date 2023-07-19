@@ -1,5 +1,5 @@
 # repdeb-helferling
-Little helper for debian-based repositories.
+Little helper software for self-hosted debian-based repositories.
 
 ## Features:
 * [repdeb-sync](#repdep-sync)
