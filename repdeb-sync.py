@@ -15,7 +15,7 @@
 
 #
 # Description: source deb packges from github releases
-# -> run this daily to be always up to date (via crontab)
+# -> run this daily to be always up to date (via crontab) see README
 #
 
 # import other scripts
