@@ -2,3 +2,6 @@ downloads
 log
 final
 .git
+backup
+__pycache__
+scripts/__pycache__
