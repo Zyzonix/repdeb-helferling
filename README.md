@@ -48,7 +48,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 # |  |  |  |  .---- day of week (0 - 6) (Sunday=0 or 7) OR sun,mon,tue,wed,thu,fri,sat
 # |  |  |  |  |
 # *  *  *  *  * user-name command to be executed
-5 0  *  *  *  * root /usr/bin/python3 /root/repo-helper/sync-repo-from-github.py
+5 0  *  *  *  * root /usr/bin/python3 /root/repdeb-helferling/repdeb-sync.py
 ```
 **Remember to add the correct path to the basedir in line 32 of repdeb-sync.py! Otherwise the program will not find it's config files. It MUST end with the '/'-character!**
 
@@ -99,6 +99,7 @@ Further development plans:
 * Add auto detection of packages/repositories to sync though indexing/reading the main config file
 * Installation/update script
 * Automatic email notification 
+* Debian-package of this project
 
 ## Updating
 ### How to update repdep-sync:
