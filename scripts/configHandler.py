@@ -148,7 +148,7 @@ class configInteractor():
         logging.write(self, "Updating config file")
         self.cnfgImp[self.configFileGeneral]["last_update"] = str(time.getTime())
         try:
-            configFileChange = open(self.configFile, "w")
+            configFileChange = open(self.basepath + self.configFile, "w")
             self.cnfgImp.write(configFileChange)
             logging.writeDebug(self, "Updated config file successfully")
         except:
