@@ -98,6 +98,7 @@ Content coming soon...
 Further development plans:
 * Add auto detection of packages/repositories to sync though indexing/reading the main config file
 * Installation/update script
+* Automatic email notification 
 
 ## Updating
 ### How to update repdep-sync:
