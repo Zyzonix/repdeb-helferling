@@ -28,6 +28,11 @@ Create this directory in the directory where the main python file is located:
 ```
 $ mkdir downloads/
 ```
+If the backup functionality is enabled for auto-cleanup: create the default directory therefore:
+```
+$ mkdir backup/
+```
+
 
 Add a crontab to automate sourcing:
 ```
