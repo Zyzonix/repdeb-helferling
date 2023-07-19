@@ -7,10 +7,10 @@
 #
 # date created  | 08-06-2023 13:04:10
 # 
-# file          | repo-helper/sync-repo-from-github.py
-# project       | repo-helper
-# project-v     | 1.1
-# file version  | 1.1
+# file          | repdeb-helferling/repdeb-sync.py
+# project       | repdeb-helferling
+# project-v     | 2.0
+# file version  | 2.0
 #
 
 #
@@ -24,22 +24,23 @@ from scripts.configHandler import configInteractor
 from scripts.syncGithub import githubInteractor
 from scripts.fileHandler import fileHandler
 
-
-from datetime import datetime
 from configparser import ConfigParser
-import os
 import traceback
-import shutil
 
 # static config
+# basepath = path to directory repdeb-helferling
+basepath = "/root/repdeb-helferling/"
 configFile = "repdeb-sync-config.ini"
-# configFile = "/root/repdeb-helferling/repdeb-sync-config.ini"
 configFileGeneral = "GENERAL"
 
 class core():
 
     # main process handler
     def runner(self):
+
+        packagesFilenameSet = {}
+        verifySuccessful = False
+        fileMoveSuccessful = False
 
         # try importing repos from file
         try:
@@ -53,33 +54,55 @@ class core():
         for repository in repositoriesToSync:
             logging.write(self, "Trying to sync " + repository)
             
-            # get latest release
-            lastestRelease = githubInteractor.getLatestRelease(self, repository)
-            logging.writeDebug(self, "Latest release for " + repository + " is " + lastestRelease)
-            
-            # check if remote latest version is locally available
-            localCurrentRelease = configInteractor.getCurrentReleaseFromFile(self, repository)
-            logging.writeDebug(self, "Current local version of " + repository + " is " + localCurrentRelease)
+            releaseData = githubInteractor.getReleaseAsJSON(self, repository)
+            if releaseData:
 
-            # if local and remote version are equal -> lookup next
-            if not localCurrentRelease == lastestRelease:
-                logging.writeDebug(self, "Local version of " + repository + " is different than on Github")
+                # extract latest release
+                logging.writeDebug(self, "Got release JSON for "+ repository)
+                latestRelease = releaseData["tag_name"]
+                logging.writeDebug(self, "Latest release for " + repository + " is " + latestRelease)
+
+                # check if remote latest version is locally available
+                localCurrentRelease = configInteractor.getCurrentReleaseFromFile(self, repository)
+                logging.writeDebug(self, "Local version of " + repository + " is " + localCurrentRelease + ", remote is " + latestRelease)
                 
-                if not ("beta" or "alpha") in lastestRelease: 
-                    logging.write(self, "Update available for " + repository)
-                    githubInteractor.downloadHandler(self, repository, lastestRelease, localCurrentRelease)
+                # if local and remote version are equal -> lookup next
+                if not localCurrentRelease == latestRelease:
+                    logging.write(self, "Update available for " + repository + " " + localCurrentRelease + " -> " + latestRelease)
+                    if not ("beta" or "alpha") in latestRelease: 
+                        logging.writeDebug(self, "Release for " + repository + " is not alpha/beta")
+
+                        # append package name to list to indicate which downloads were successful
+                        packagesFilenameSet.update(githubInteractor.downloadHandler(self, repository, releaseData, latestRelease, localCurrentRelease))
+                        
+                    else:
+                        logging.write(self, repository + "'s latest release contains alpha/beta - skipping")
+                
+                # if version is the latest
                 else:
-                    logging.write(self, repository + "'s latest release contains alpha/beta - skipping")
-            
-            # if version is the latest
+                    logging.write(self, "Local version is the newest - skipping " + repository)
+                    logging.writeDebug(self, "Local version: " + localCurrentRelease + " - Latest version on GitHub: " + latestRelease)
+
             else:
-                logging.write(self, "Local version is the newest - skipping " + repository)
-                logging.writeDebug(self, "Local version: " + localCurrentRelease + " - Latest version on GitHub: " + lastestRelease)
-                
+                logging.writeError(self, "Wasn't able to get release data for " + repository + " - skipping")
+
         # finally move all files and update versions in config
-        fileHandler.fileHandler(self)
+        if packagesFilenameSet: fileMoveSuccessful = fileHandler.moveFiles(self)
+
+        # verify filenames in index.ini, filesNotInIndex unused
+        if self.autocleanup: verifySuccessful, filesToRemoveFromIndex, filesNotInIndex = fileHandler.verifyIndex(self, packagesFilenameSet)
+        if verifySuccessful and fileMoveSuccessful: 
+            logging.write(self, "Moving and verifying files successful")  
+
+            # remove old binaries/packages
+            # filesToRemoveFromIndex contains old packages as dict: package: [filelist]
+            if packagesFilenameSet and filesToRemoveFromIndex: fileHandler.cleanUp(self, filesToRemoveFromIndex)
+       
+        # updated main config file
         configInteractor.updateConfig(self)
-            
+        logging.write(self, "Finished syncing. Exiting...")
+        logging.write(self, "")
+
 
     def __init__(self):
 
@@ -87,7 +110,7 @@ class core():
         self.cnfgImp = ConfigParser(comment_prefixes='/', allow_no_value=True)
         
         # open config.ini file
-        self.cnfgImp.read(configFile)
+        self.cnfgImp.read(basepath + configFile)
 
         try:
             # get logfile path
@@ -95,10 +118,16 @@ class core():
             self.downloads = self.cnfgImp[configFileGeneral]["downloads"]
             self.finalDebDir = self.cnfgImp[configFileGeneral]["final_deb_dir"]
             self.loglevel = int(self.cnfgImp[configFileGeneral]["loglevel"])
+            self.autocleanup = self.cnfgImp.getboolean("GENERAL", "autocleanup")
+            # make basepath accessible everywhere
+            self.basepath = basepath
 
             # import static variables as self variable
             self.configFileGeneral = configFileGeneral
             self.configFile = configFile
+            logging.write(self, "-----------------------")
+            logging.write(self, "| Running REPDEB-SYNC |")
+            logging.write(self, "-----------------------")
             logging.writeDebug(self, "Got all variables, logFileDir: " + self.logFileDir + ", downloads: " + self.downloads + ", finalDebDir: " + self.finalDebDir + ", configFile: " + self.configFile)
         except:
             print(traceback.format_exc())

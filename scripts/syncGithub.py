@@ -9,49 +9,75 @@
 # 
 # file          | scripts/syncGithub.py
 # project       | repdeb-helferling
-# file version  | 1.0
+# file version  | 2.0
 #
 from scripts.logging import logging
 from scripts.configHandler import configInteractor
 
-import subprocess
 import traceback
 import wget
 import os
+import json
+import requests
+
+
+# collect all names for architectures
+# referenced in this file and fileHandler.py!
+architecture_alias_list = {
+    "arm64" : ["aarch64", "arm64", "armv8"],
+    "amd64" : ["x86", "x86_64", "amd64"],
+    "armhf" : ["arm32", "armhf", "armv7"]
+}
 
 
 class githubInteractor():
     
-    # look for latest release on github
-    def getLatestRelease(self, repository):
-        try:
+    # get full repo name user/repository from config
+    def getFullRepositoryName(self, repository):
+        try:   
+            logging.writeDebug(self, "Trying to get fullRepositoryName of " + repository)
             fullRepositoryName = configInteractor.getFullRepositoryName(self, repository)
-        except:
-            logging.writeError(self, "Failed to get full repository name from file - check your config at " + repository + " 'repo_name'")
-            logging.writeExecError(self, traceback.format_exc())
-            return
-    
-        try: 
-            getLatestVersionCommand = "curl https://api.github.com/repos/" + fullRepositoryName + "/releases/latest -s | grep 'tag_name' | awk '{print substr($2, 2, length($2)-3) }'"
-            latestVersionEncoded = subprocess.run(getLatestVersionCommand, capture_output=True, shell=True)
-            # decode and remove last \n 
-            latestVersion = latestVersionEncoded.stdout.decode()[:-1]
-            if not latestVersion: 
-                logging.writeError(self, "Was not able to retrieve latest version for " + repository)
-                return False
-            return latestVersion
-        
+            logging.writeDebug(self, "Got fullRepositoryName of " + repository + " is " + fullRepositoryName)
+            return fullRepositoryName
         except:
             logging.writeError(self, "Failed to get full repository name from file - check your config at " + repository + " 'repo_name'")
             logging.writeExecError(self, traceback.format_exc())
             return False
 
-    # remove unwanted letters from version
-    def editVersion(self, version):
-        if "-" in version:
-            logging.writeDebug(self, "Editing of version required: " + version)
-            return version.rsplit("-", 1)[0]
-        return version
+    # get latest release file from GitHub
+    def getReleaseFile(self, fullRepositoryName):
+        try:
+            downloadedReleasePageURL = "https://api.github.com/repos/" + fullRepositoryName + "/releases/latest"
+            logging.writeDebug(self, "Release file download URL for " + fullRepositoryName + " is " + downloadedReleasePageURL + " - trying to download")
+            downloadedReleasePage = requests.get(downloadedReleasePageURL)
+            downloadedReleasePageText = downloadedReleasePage.text
+            return downloadedReleasePageText
+        except:
+            logging.writeError(self, "Failed to get latest release file for " + fullRepositoryName + " - skipping")
+            logging.writeExecError(self, traceback.format_exc())
+            return False
+
+    # first get release page, then import to JSON variable
+    def getReleaseFileJSON(self, fullRepositoryName):
+        logging.writeDebug(self, "Getting release file for " + fullRepositoryName)
+        downloadedReleasePageText = githubInteractor.getReleaseFile(self, fullRepositoryName)
+        if downloadedReleasePageText:
+            try:
+                releasePageJSON = json.loads(downloadedReleasePageText)
+                return releasePageJSON
+            except:
+                logging.writeError(self, "Failed to get latest release file for " + fullRepositoryName + " - skipping")
+                logging.writeExecError(self, traceback.format_exc())
+                return False
+
+    # look for latest release on github
+    def getReleaseAsJSON(self, repository):
+        
+        fullRepositoryName = githubInteractor.getFullRepositoryName(self, repository)
+        if not fullRepositoryName: return False
+        releasePageJSON = githubInteractor.getReleaseFileJSON(self, fullRepositoryName)
+        if not releasePageJSON: return False
+        return releasePageJSON
 
     # edit name of file / add architecture if not in
     def renameFile(self, file, architecture):
@@ -66,54 +92,129 @@ class githubInteractor():
             logging.writeError(self, "Failed to move all downloads to repository's directory")
             logging.writeExecError(self, traceback.format_exc())
 
-    # update downloaded version in ini file
-    def updateVersion(self, repository, version, oldversion):
-        logging.write(self, "Updating version in config for " + repository + " from " + oldversion + " to " + version)
-        self.cnfgImp[repository.upper()]["version"] = version
-        logging.writeDebug(self, "New local version of " + repository + " was set to " + self.cnfgImp[repository.upper()]["version"])
+    # get DEB-file download URL from release file, filter for deb-packages
+    def getDEBDownloadURLs(self, releaseData, packages, local_architecture_alias_list):
+        try:
+            assets = releaseData["assets"]
+            # scheme of packagesFilenameSet: {package : {asset_name:asset_url, asset_name2:asset_url2}}
+            packagesFilenameSet = {}
+
+            for package in packages:
+                packagesFilenameSet[package] = {}
+                for asset in assets:
+                    # try to get asset information (can be extented if required)
+                    try:
+                        asset_name = asset["name"]
+
+                        for architecture_alias in local_architecture_alias_list:
+                            # check if package should be synced
+                            # sync packages, that have a .deb ending, arent .torrent-files, and have the correct/wanted architecture
+                            if ".deb" in asset_name and package in asset_name and architecture_alias in asset_name and not ".torrent" in asset_name:
+                                # link package name from config with complete package name
+                                packagesFilenameSet[package][asset_name] = asset["browser_download_url"]
+                                logging.writeDebug(self, "Added '" + asset_name + "' with '" + asset["browser_download_url"] + "' as URL to download set")
+                    except:
+                        logging.writeExecError(self, traceback.print_exc())
+            return packagesFilenameSet
+        except:
+            logging.writeExecError(self, traceback.format_exc())
+            return False, False
+
 
     # download latest release files
-    def downloadHandler(self, repository, version, oldversion):
-        
-        # get architectures
-        try:
-            architectures = self.cnfgImp[repository.upper()]["architectures"].split(",")
-            packages = self.cnfgImp[repository.upper()]["packages"].split(",")
-            logging.writeDebug(self, "Got packages and architectures for " + repository + ", Packages: " + str(packages) + ", Architectures: " + str(architectures))
-        except:
-            logging.writeError(self, "Failed to get architectures from file - check your config at " + repository + " 'repo_name'")
-            logging.writeExecError(self, traceback.format_exc())
-            return False
-        
-        # edit version to download-compatible version, if release is 1.1.7-7 but download 1.1.7
-        downloadVersion = githubInteractor.editVersion(self, version) 
+    def downloadHandler(self, repository, releaseData, version, oldversion):
 
-        # get naming schemes from file
-        for architecture in architectures:
-            logging.writeDebug(self, "Syncing architecture (" + architecture + ") for " + repository)
-            nameSchemeFromFile = self.cnfgImp[repository.upper()]["name_scheme_" + architecture]
-            
-            # iterate through packages 
-            for package in packages:
-                logging.writeDebug(self, "Syncing package " + package + " of " + repository)
-                finalPackage = nameSchemeFromFile.replace("?PACKAGE?", package).replace("?VERSION?", downloadVersion)
+        # get packages
+        packages = configInteractor.getPackages(self, repository)
+        if packages:
+            logging.writeDebug(self, "Got packages " + repository + ", Packages: " + str(packages))
+
+            # get architectures
+            architectures = configInteractor.getArchitectures(self, repository)
+
+            # check if all architectures should be downloaded -> retrieve default architectures from file
+            if "all" in architectures: architectures = configInteractor.resolveAllArchitectures(self)
+
+            # start getting files when retrieved architectures
+            if architectures:
+                logging.writeDebug(self, "Set architectures to sync for " + repository + ": " + str(architectures))
+
+                # paste all architecture aliases to one list
+                local_architecture_alias_list = []
+                for architecture in architectures:
+                    for alias in architecture_alias_list[architecture]:
+                        if architecture in architectures:
+                            local_architecture_alias_list.append(alias)
+                    if architecture in architectures:
+                        local_architecture_alias_list.append(architecture)
+
+                logging.writeDebug(self, "Local architecture alias list for " + repository + " is " + str(local_architecture_alias_list))
+
+                # get package URLs to download
+                packagesFilenameSet = githubInteractor.getDEBDownloadURLs(self, releaseData, packages, local_architecture_alias_list)
+                logging.writeDebug(self, "Package collection to download: " + str(packagesFilenameSet))
+
+                if  packagesFilenameSet:
+                    # scheme of fileToDownload is {package : {asset_name:asset_url, asset_name2:asset_url2}}
+                    filesToDownload = {}
+
+                    # iterate through to files to download and compare with architectures to download
+                    for package in packagesFilenameSet.keys():
+                        filesToDownload[package] = {}
+                        logging.writeDebug(self, "Checking " + package)
+                        for file in packagesFilenameSet[package].keys():
+                            architecture_found = False
+                            for architecture_alias in local_architecture_alias_list:
+                                if architecture_alias in file:
+                                    filesToDownload[package][file] = packagesFilenameSet[package][file]
+                                    logging.writeDebug(self, "Added " + file + " to download list")
+                                    architecture_found = True
+                                    break
+                            
+                            if not architecture_found:
+                                logging.writeDebug(self, "Adding " + file + " didn't found any architecture in filename") 
+                                filesToDownload[package][file] = packagesFilenameSet[package][file]
+
+                    logging.writeDebug(self, "Fileset to download: " + str(filesToDownload))
+
+                    for package in packagesFilenameSet.keys():
+
+                        downloadFailed = []
+                        # indicator wheter anything has been downloaded (to prevent update of version although nothing was downloaded)
+                        downloadedAnything = False
+
+                        # downloads files to download directory
+                        for file in packagesFilenameSet[package].keys():
+                            try: 
+                                wget.download(packagesFilenameSet[package][file], self.downloads + file)
+                                # print empty line 
+                                print()
+                                logging.write(self, "Downloaded " + file + " successfully")
+                            except:
+                                logging.writeError(self, "Failed to download " + file)
+                                logging.writeExecError(self, traceback.format_exc())
+                                # add filename to list, to remove it later from the set
+                                downloadFailed.append(file)
+                                return 
+                            downloadedAnything = True
+
+                        try: 
+                            if downloadedAnything: configInteractor.updateVersion(self, repository, version, oldversion)
+                        except: 
+                            logging.writeError(self, "Could not update version in config file")
+                            logging.writeExecError(self, traceback.format_exc())
+                    
+                        for file in downloadFailed:
+                            packagesFilenameSet[package].pop(file)
+
+                        logging.writeDebug(self, "Successfully downloaded Fileset: " + str(packagesFilenameSet))
+                        
+                else:
+                    logging.writeError(self, "There are no files to download for " + repository)
+                    logging.writeDebug(self, "Failed to get download URLs")
                 
-                # download file
-                urlToDownload = "https://github.com/" + self.cnfgImp[repository.upper()]["repo_name"] + "/releases/download/" + version + "/" + finalPackage
-                try: 
-                    wget.download(urlToDownload, self.downloads + finalPackage)
-                    # print empty line 
-                    print()
-                    logging.write(self, "Downloaded " + finalPackage + " successfully")
-                except:
-                    logging.writeError(self, "Failed to download " + finalPackage)
-                    logging.writeExecError(self, traceback.format_exc())
-                    return
-                try: githubInteractor.renameFile(self, finalPackage, architecture)
-                except: 
-                    logging.writeError(self, "Could not rename files")
-                    logging.writeExecError(self, traceback.format_exc())
-                try: githubInteractor.updateVersion(self, repository, version, oldversion)
-                except: 
-                    logging.writeError(self, "Could not update version in config file")
-                    logging.writeExecError(self, traceback.format_exc())
+
+            else:
+                logging.writeError(self, "Failed to get architectures for " + repository)
+
+        return packagesFilenameSet
