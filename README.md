@@ -1,3 +1,5 @@
+# This repository is outdated! This software will become a major update and will then be released under Zyzonix/esus!
+
 # repdeb-helferling
 Little helper software for self-hosted debian-based repositories.
 
